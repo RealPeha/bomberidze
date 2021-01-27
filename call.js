@@ -42,6 +42,7 @@ const createRequest = (number, siteRequestInfo) => {
 const DEFAULT_OPTIONS = {
     concurrency: 1,
     timeout: 1,
+    limit: 1,
 }
 
 class Call extends EventEmitter {
@@ -62,20 +63,19 @@ class Call extends EventEmitter {
             return
         }
 
-        const { timeout } = this.options
+        const { timeout, limit } = this.options
         
         const siteRequestInfo = this.data[this.cursor]
 
-        if (!siteRequestInfo) {
-            this.isRunning = false
-
-            return this.emit('finish')
+        if (!siteRequestInfo || this.cursor > limit) {
+            return this.stop()
         }
 
         const request = createRequest(this.number, siteRequestInfo)
 
         const next = () => {
             this.cursor += 1
+
             this.next()
         }
 
@@ -118,6 +118,8 @@ class Call extends EventEmitter {
 
     stop() {
         this.isRunning = false
+
+        this.emit('finish')
 
         return this
     }
