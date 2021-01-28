@@ -45,6 +45,7 @@ https://vpodobayka.com/ru/catalog/zhinkam/domashnij-komplekt-4-rechi-halat-majka
 https://nadiyabud.com/commercialukr
 https://license-service.in.ua/contacts/
 https://www.ganz-paintball.com/ua/viyizniy-peyntbol-ua/
+https://api.raketaapp.com/v1/auth/voice_calls
 
 #### Failed
 https://robot.net.ua/ua/bitrix24/cloud/

