@@ -1,5 +1,5 @@
-const EventEmitter = require('events')
 const fetch = require('node-fetch')
+const Queue = require('better-queue')
 
 const userAgent = require('./utils/userAgent')
 const createFormDataFromObject = require('./utils/createFromDataFromObject')
@@ -7,99 +7,27 @@ const createFormDataFromObject = require('./utils/createFromDataFromObject')
 const DEFAULT_OPTIONS = {
     concurrency: 1,
     timeout: 1,
-    limit: Infinity,
-    offset: 0,
 }
 
-const defaultName = 'Андрей'
+const createRequest = (siteRequestData, bodyData) => {
+    const {
+        url: getUrl,
+        method = 'get',
+        type = 'Object',
+        body: getBody = () => ({}),
+        parse = 'json',
+        headers = {},
+    } = siteRequestData
 
-class Bomber extends EventEmitter {
-    constructor(number, name = defaultName, options = {}) {
-        super()
+    const { number, name } = bodyData
 
-        this.number = number
-        this.name = name
-        this.options = {...DEFAULT_OPTIONS, ...options}
-        this.cursor = this.options.offset
-        this.isRunning = false
-        this.data = []
-    }
+    const url = typeof getUrl === 'function' ? getUrl(number, name) : getUrl
+    const body = type === 'FormData'
+        ? createFormDataFromObject(getBody(number, name))
+        : JSON.stringify(getBody(number, name))
 
-    next() {
-        if (!this.data || !this.data.length) {
-            throw new Error('data is empty')
-        }
-
-        if (!this.isRunning) {
-            return
-        }
-
-        const { timeout, limit } = this.options
-        
-        const siteRequestInfo = this.data[this.cursor]
-
-        if (!siteRequestInfo || this.cursor >= (this.options.offset + limit)) {
-            return this.stop()
-        }
-
-        const next = () => {
-            this.cursor += 1
-
-            this.next()
-        }
-
-        return this.createRequest(siteRequestInfo)
-            .then(result => {
-                if ('isSuccess' in siteRequestInfo && !siteRequestInfo.isSuccess(result)) {
-                    return Promise.reject(result)
-                }
-
-                this.emit('send', { result, site: siteRequestInfo })
-
-                this.success += 1
-
-                if (timeout) {
-                    setTimeout(() => next(), timeout)
-                } else {
-                    next()
-                }
-            })
-            .catch((err) => {
-                this.failed += 1
-                
-                this.emit('error', { err, site: siteRequestInfo })
-
-                next()
-            })
-    }
-
-    createRequest(siteRequestInfo) {
-        const {
-            url: getUrl,
-            method = 'get',
-            type = 'Object',
-            body: getBody = () => ({}),
-            parse = 'json',
-            headers = {},
-        } = siteRequestInfo
-    
-        const url = typeof getUrl === 'function' ? getUrl(this.number, this.name) : getUrl
-        const body = type === 'FormData'
-            ? createFormDataFromObject(getBody(this.number, this.name))
-            : JSON.stringify(getBody(this.number, this.name))
-    
-        if (method === 'get') {
-            return fetch(url, {
-                headers: {
-                    'User-Agent': userAgent(),
-                    ...headers,
-                },
-            }).then(res => res[parse]())
-        }
-    
+    if (method === 'get') {
         return fetch(url, {
-            method: method.toUpperCase(),
-            body,
             headers: {
                 'User-Agent': userAgent(),
                 ...headers,
@@ -107,47 +35,68 @@ class Bomber extends EventEmitter {
         }).then(res => res[parse]())
     }
 
-    reset() {
+    return fetch(url, {
+        method: method.toUpperCase(),
+        body,
+        headers: {
+            'User-Agent': userAgent(),
+            ...headers,
+        },
+    }).then(res => res[parse]())
+}
+
+class Bomber {
+    constructor(services, body, options = {}) {
+        this.services = services
+        this.body = body
+        this.amount = services.length
+        this.options = {...DEFAULT_OPTIONS, ...options}
+
         this.isRunning = false
-        this.cursor = 0
-
-        return this
-    }
-
-    start(data = []) {
-        this.data = data
-        this.isRunning = true
-        this.count = data.length
         this.success = 0
         this.failed = 0
+        this.processed = 0
 
-        this.next()
-
-        return this
+        this.queue = new Queue(this.processor, {
+            afterProcessDelay: this.options.timeout,
+            concurrent: this.options.concurrency
+        })
+            .on('drain', () => this.isRunning = false)
+            .on('task_started', () => this.processed += 1)
+            .on('task_failed', () => this.failed += 1)
+            .on('task_finish', () => this.success += 1)
     }
 
-    stop(silent = false) {
-        this.isRunning = false
+    processor = (siteRequestData, next) => {
+        console.log('process')
+        return createRequest(siteRequestData, this.body)
+            .then(result => {
+                if ('isSuccess' in siteRequestData && !siteRequestData.isSuccess(result)) {
+                    return Promise.reject(result)
+                }
 
-        if (!silent) {
-            this.emit('finish')
-        }
-
-        return this
+                return next(null, { result, site: siteRequestData })
+            })
+            .catch((err) => next({ err, site: siteRequestData }))
     }
 
-    pause() {
-        this.isRunning = false
-
-        return this
-    }
-
-    resume() {
+    start(options = {}) {
+        this.options = {...this.options, ...options}
         this.isRunning = true
+        this.success = 0
+        this.failed = 0
+        this.processed = 0
 
-        this.next()
+        this.services.forEach(service => {
+            this.queue.push(service)
+        })
 
-        return this
+        return this.queue
+    }
+
+    stop() {
+        this.queue.pause()
+        this.queue.destroy()
     }
 }
 

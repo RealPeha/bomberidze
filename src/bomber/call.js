@@ -1,5 +1,11 @@
 const Bomber = require('./bomber')
 
-class Call extends Bomber {}
+const callServices = require('./services/call')
+
+class Call extends Bomber {
+    constructor(body, options) {
+        super(callServices, body, options)
+    }
+}
 
 module.exports = Call

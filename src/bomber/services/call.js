@@ -255,4 +255,18 @@ module.exports = [
         parse: 'json',
         isSuccess: res => res && res.success
     },
+    {
+        baseUrl: 'teleport.in.ua',
+        url: 'https://teleport.in.ua/uslugi/rope-jumping-13th-floor/',
+        method: 'post',
+        type: 'FormData',
+        body: (phone, name) => ({
+            'your-phone': phone,
+            _wpcf7_is_ajax_call: 1,
+            _wpcf7: 228,
+            _wpnonce: nonce(),
+        }),
+        parse: 'json',
+        isSuccess: res => res && res.mailSent
+    },
 ]

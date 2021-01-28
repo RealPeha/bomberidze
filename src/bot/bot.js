@@ -8,20 +8,18 @@ const SMS = require('../bomber/sms')
 const callServices = require('../bomber/services/call')
 const smsServices = require('../bomber/services/sms')
 
+const BOMBERS = {
+    CALL: 'Call',
+    SMS: 'SMS',
+}
+
 const bot = new Telegraf(process.env.BOT_TOKEN)
 
-bot.use(session())
-
-const MAX_ACTIVE = 50
-let active = 0
-
-const spamTypeKeyboard = Keyboard.reply(['✉️ СМС', '☎️ Звонки'], {}, Extra.HTML())
+const html = Extra.HTML()
+const noop = () => 42
+const spamTypeKeyboard = Keyboard.reply(['✉️ СМС', '☎️ Звонки'], {}, html)
 
 const start = ctx => {
-    ctx.session.bomber = null
-    ctx.session.bomberType = ''
-    ctx.session.number = ''
-
     return ctx.reply(dedent`
         Привет 👨‍💻
 
@@ -32,127 +30,121 @@ const start = ctx => {
     `, spamTypeKeyboard)
 }
 
+bot.use(session())
+
 bot.start(start)
 
 bot.hears('✉️ СМС', (ctx) => {
-    ctx.session.bomberType = 'SMS'
+    if (ctx.session.bomber && ctx.session.bomber.isRunning) {
+        return ctx.reply('Бомбер уже запущен', Keyboard.reply('Остановить'))
+    }
 
-    return ctx.reply('Введи номер жертвы (с +38 в начале)', Keyboard.remove())
+    ctx.session.bomberType = BOMBERS.SMS
+
+    return ctx.reply('Введи номер жертвы (начиная с <code>+38</code>)', {...Keyboard.remove(), parse_mode: 'HTML'})
 })
 
 bot.hears('☎️ Звонки', (ctx) => {
-    ctx.session.bomberType = 'Call'
+    if (ctx.session.bomber && ctx.session.bomber.isRunning) {
+        return ctx.reply('Бомбер уже запущен', Keyboard.reply('Остановить'))
+    }
 
-    return ctx.reply('Введи номер жертвы (с +38 в начале)', Keyboard.remove())
+    ctx.session.bomberType = BOMBERS.CALL
+
+    return ctx.reply('Введи номер жертвы (начиная с <code>+38</code>)', {...Keyboard.remove(), parse_mode: 'HTML'})
 })
 
-bot.hears('Прекратить', async (ctx, next) => {
+bot.hears('Остановить', async (ctx, next) => {
     if (ctx.session.bomber) {
-        ctx.session.bomber.stop(true)
-        active -= 1
+        ctx.session.bomber.stop()
 
-        await ctx.reply('Прекращено')
+        await ctx.reply('Остановлено')
     }
+
+    ctx.session = {}
 
     return next()
 }, start)
 
-bot.hears('Начать атаку', async (ctx) => {
-    if (ctx.session.bomber && !ctx.session.bomber.isRunning) {
-        if ((active + 1) > MAX_ACTIVE) {
-            return ctx.reply('Бомбер перегружен. Попробуйте пожалуйста позже')
-        }
+bot.hears('Начать атаку', async ({ session, chat, telegram, reply}) => {
+    if (session.bomber && !session.bomber.isRunning) {
+        await reply('Начинаю атаковать...', Keyboard.reply('Остановить'))
 
-        active += 1
-        await ctx.reply('Рассылаю запросы на звонки...', Keyboard.reply('Прекратить'))
-
-        const services = ctx.session.bomberType === 'SMS' ? smsServices : callServices
-
-        ctx.session.bomber.start(services)
-            .on('send', ({ result, site }) => {
-                ctx.telegram.sendMessage(ctx.chat.id, `[${ctx.session.bomber.success + 1}/${ctx.session.bomber.count}] Успешно: <code>${site.baseUrl || site.url}</code>`, Extra.webPreview(false).HTML())
-                    .catch(() => 42)
+        session.bomber.start()
+            .on('task_finish', (taskId, { result, site }) => {
+                telegram.sendMessage(
+                    chat.id,
+                    `[${session.bomber.success} / ${session.bomber.amount}] Успешно: <code>${site.baseUrl || site.url}</code>`,
+                    html
+                ).catch(noop)
             })
-            .on('error', ({ err, site }) => {
-                ctx.telegram.sendMessage(ctx.chat.id, `[${ctx.session.bomber.success}/${ctx.session.bomber.count}] Не удалось: <code>${site.baseUrl || site.url}\n${JSON.stringify(err, null, 2)}</code>`, Extra.webPreview(false).HTML())
-                    .catch(() => 42)
+            .on('task_failed', (taskId, { err, site }) => {
+                telegram.sendMessage(
+                    chat.id,
+                    `[${session.bomber.success} / ${session.bomber.amount}] Не удалось: <code>${site.baseUrl || site.url}\n${JSON.stringify(err, null, 2)}</code>`,
+                    html
+                ).catch(noop)
             })
-            .on('finish', () => {
-                ctx.telegram.sendMessage(ctx.chat.id, dedent`
-                    Бомбардировка закончена
+            .on('drain', () => {
+                telegram.sendMessage(
+                    chat.id,
+                    dedent`
+                        Бомбардировка закончена
 
-                    <b>Успешно:</b> ${ctx.session.bomber.success} / ${ctx.session.bomber.count} 
-                `, Keyboard.reply('Отлично', {}, Extra.HTML())).catch(() => 42)
-
-                active -= 1
-                ctx.session.bomber = null
-                ctx.session.bomberType = null
+                        <b>Успешно:</b> ${session.bomber.success} / ${session.bomber.amount} 
+                    `,
+                    Keyboard.reply('Отлично', {}, html)
+                ).catch(noop)
             })
     }
 })
 
-bot.hears(['Отмена', 'Отлично'], start)
+bot.hears(['Отмена', 'Отлично'], Telegraf.tap(ctx => ctx.session = {}), start)
 
-bot.command('/pause', ctx => {
-    if (ctx.session.bomber) {
-        ctx.session.bomber.pause()
-        active -= 1
-
-        return ctx.reply('Бомбер остановлен. Ты можешь возобновить его командой /resume')
-    }
-})
-
-bot.command('/resume', ctx => {
-    if (ctx.session.bomber) {
-        ctx.session.bomber.resume()
-        active += 1
-
-        return ctx.reply('Продолжаю рассылку...')
-    }
-})
-
-bot.on('text', ctx => {
-    if (ctx.session.bomber) {
+bot.on('text', ({ session, message, reply }) => {
+    if (session.bomber) {
         return
     }
 
-    if (!ctx.session.bomberType) {
-        return ctx.reply('Сначала выбери тип атаки', spamTypeKeyboard)
+    if (!session.bomberType) {
+        return reply('Сначала выбери тип атаки', spamTypeKeyboard)
     }
 
-    const text = ctx.message.text.trim()
+    let text = message.text.trim()
 
-    if (ctx.session.number) {
-        if (ctx.session.bomberType === 'Call') {
-            ctx.session.bomber = new Call(ctx.session.number, text || null, {
-                // limit: 3,
-            })    
+    if (!session.number) {
+        text = text.replace(/[\s-()]/g, '')
+
+        if (!text.startsWith('+380')) {
+            return reply('Номер должен начинаться с <code>+380</code>', html)
         }
-
-        return ctx.reply('Готов начать?', Keyboard.reply(['Начать атаку', 'Отмена']))
+    
+        if (text.length !== 13) {
+            return reply('Что-то не так с номером')
+        }
     }
 
-    const number = text
+    switch (session.bomberType) {
+        case BOMBERS.CALL: {
+            if (session.number) {
+                session.bomber = new Call({
+                    number: session.number,
+                    name: text || '',
+                })
+            } else {
+                session.number = text
 
-    if (!number.startsWith('+380')) {
-        return ctx.reply('Номер должен начинаться с <code>+380</code>', Extra.HTML())
+                return reply('👤 Теперь введи имя жертвы')
+            }
+
+            break
+        }
+        case BOMBERS.SMS: {
+            session.bomber = new SMS({ number: text })
+        }
     }
 
-    if (number.length !== 13) {
-        return ctx.reply('Что-то не так с номером')
-    }
-
-    if (ctx.session.bomberType === 'SMS') {
-        ctx.session.bomber = new SMS(number, '', {
-            // limit: 3,
-        })
-
-        return ctx.reply('Готов начать?', Keyboard.reply(['Начать атаку', 'Отмена']))
-    }
-
-    ctx.session.number = number
-
-    return ctx.reply('👤 Теперь введи имя жертвы')
+    return reply('Готов начать?', Keyboard.reply(['Начать атаку', 'Отмена']))
 })
 
 module.exports = bot
