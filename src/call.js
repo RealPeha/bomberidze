@@ -1,6 +1,7 @@
 const EventEmitter = require('events')
-const userAgent = require('random-useragent').getRandom
 const fetch = require('node-fetch')
+const FormData = require('form-data')
+const userAgent = require('random-useragent').getRandom
 
 const createFormDataFromObject = (object) => {
     const formData = new FormData()
@@ -24,10 +25,19 @@ const createRequest = (number, siteRequestInfo) => {
         headers = {},
     } = siteRequestInfo
 
-    const url = typeof getUrl === 'function' ? getUrl() : getUrl
+    const url = typeof getUrl === 'function' ? getUrl(number) : getUrl
     const body = type === 'FormData'
         ? createFormDataFromObject(getBody(number))
         : JSON.stringify(getBody(number))
+
+    if (method === 'get') {
+        return fetch(url, {
+            headers: {
+                'User-Agent': userAgent(),
+                ...headers,
+            },
+        }).then(res => res[parse]())
+    }
 
     return fetch(url, {
         method: method.toUpperCase(),
@@ -42,14 +52,17 @@ const createRequest = (number, siteRequestInfo) => {
 const DEFAULT_OPTIONS = {
     concurrency: 1,
     timeout: 1,
-    limit: 1,
+    limit: Infinity,
+    offset: 0,
 }
 
 class Call extends EventEmitter {
     constructor(number, options = {}) {
+        super()
+
         this.number = number
         this.options = {...DEFAULT_OPTIONS, ...options}
-        this.cursor = 0
+        this.cursor = this.options.offset
         this.isRunning = false
         this.data = []
     }
@@ -67,7 +80,7 @@ class Call extends EventEmitter {
         
         const siteRequestInfo = this.data[this.cursor]
 
-        if (!siteRequestInfo || this.cursor > limit) {
+        if (!siteRequestInfo || this.cursor >= (this.options.offset + limit)) {
             return this.stop()
         }
 
@@ -80,12 +93,12 @@ class Call extends EventEmitter {
         }
 
         return request
-            .then(res => {
-                if (siteRequestInfo.isSuccess && !siteRequestInfo.isSuccess(res)) {
-                    return Promise.reject(res)
+            .then(result => {
+                if ('isSuccess' in siteRequestInfo && !siteRequestInfo.isSuccess(result)) {
+                    return Promise.reject(result)
                 }
 
-                this.emit('send', { res, site: siteRequestInfo })
+                this.emit('send', { result, site: siteRequestInfo })
 
                 if (timeout) {
                     setTimeout(() => next(), timeout)

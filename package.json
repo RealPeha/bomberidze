@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
+  "scripts": {
+    "call": "node ./src/index.js"
+  },
   "dependencies": {
+    "form-data": "^3.0.0",
     "node-fetch": "^2.6.1",
     "random-useragent": "^0.5.0"
   }
