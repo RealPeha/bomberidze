@@ -32,4 +32,29 @@ module.exports = [
         parse: 'json',
         isSuccess: res => res && res.success
     },
+    {
+        baseUrl: 'sweet.tv',
+        url: 'https://api.sweet.tv/SignupService/SetPhone.json',
+        method: 'post',
+        body: (phone, name) => ({
+            phone: phone.substr(1),
+            locale: 'uk',
+            device: {
+                type: 'DT_Web_Browser',
+            },
+        }),
+        parse: 'json',
+        isSuccess: res => res && res.status && res.status === 'OK'
+    },
+    {
+        baseUrl: 'ontaxi.com.ua',
+        url: 'https://ontaxi.com.ua/api/v2/web/client',
+        method: 'post',
+        body: (phone, name) => ({
+            phone: phone.substr(3),
+            country: 'UA'
+        }),
+        parse: 'json',
+        isSuccess: res => res && res.ok
+    },
 ]
